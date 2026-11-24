@@ -1,0 +1,49 @@
+# Fast security gates on staged files. Budget: under ~10 seconds per commit,
+# or you'll start reaching for --no-verify.
+# Heavy scans (full SAST, dependency audit, image scan, DAST) run in CI.
+#
+# Setup:
+#   pipx install pre-commit checkov      # conftest: see github.com/open-policy-agent/conftest
+#   pre-commit install
+#   pre-commit autoupdate                # bumps the revs below to current releases
+#   pre-commit run --all-files           # first run over the whole repo
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+
+  # Secrets in staged changes. Full-history scans run in CI.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # Lint + format. With the "S" rules enabled in pyproject.toml, ruff also runs
+  # the bandit security checks: SAST-lite in under a second.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # IaC misconfiguration. Fires only when these files are staged.
+      - id: checkov
+        name: checkov (IaC misconfig)
+        entry: checkov --quiet --compact -f
+        language: system
+        files: (^|/)(Dockerfile[^/]*|(docker-)?compose[^/]*\.ya?ml|[^/]+\.tf|\.github/workflows/[^/]+\.ya?ml)$
+
+      # This repo's own rules, written in Rego, for things generic scanners don't know.
+      - id: conftest-compose
+        name: conftest (compose policy)
+        entry: conftest test --policy policy/
+        language: system
+        files: (^|/)(docker-)?compose[^/]*\.ya?ml$

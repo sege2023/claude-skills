@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# scripts/verify.sh — one command for you, CI and Claude.
+#   ./scripts/verify.sh                       full suite
+#   ./scripts/verify.sh engine/execution/tests   only these tests (types and lint stay repo-wide)
+# Exits non-zero if any step fails. Runs every step even after a failure, so
+# you see all problems at once.
+set -uo pipefail
+
+# Runner prefix: "uv run", "poetry run", or "" if tools are on PATH.
+read -r -a RUN <<< "${VERIFY_RUNNER:-uv run}"
+
+# Tests marked @pytest.mark.slow (e.g. njit compilation, long backtests) are
+# skipped locally. CI sets VERIFY_FULL=1 to include them.
+PYTEST_MARK=(-m "not slow")
+if [[ "${VERIFY_FULL:-0}" == "1" ]]; then PYTEST_MARK=(); fi
+
+fail=0
+step() {
+  local name="$1"; shift
+  printf '\n== %s ==\n' "$name"
+  if "$@"; then
+    printf 'ok: %s\n' "$name"
+  else
+    printf 'FAIL: %s\n' "$name"
+    fail=1
+  fi
+}
+
+step "format" "${RUN[@]}" ruff format --check .
+step "lint"   "${RUN[@]}" ruff check .
+step "types"  "${RUN[@]}" pyright
+step "tests"  "${RUN[@]}" pytest -q "${PYTEST_MARK[@]}" "$@"
+
+printf '\n'
+if [[ $fail -eq 0 ]]; then echo "verify: all checks passed"; else echo "verify: FAILED"; fi
+exit $fail
